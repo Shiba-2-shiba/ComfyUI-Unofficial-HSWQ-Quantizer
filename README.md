@@ -60,6 +60,18 @@ git clone [https://github.com/](https://github.com/)<yourname>/ComfyUI-HSWQ-Quan
 
 > Please restart ComfyUI after installation.
 
+### Dependencies
+This project relies on **PyTorch with FP8 support** and includes optional dependencies for the benchmark node:
+
+* **Required:** `torch` with `torch.float8_e4m3fn` support
+* **Benchmark node:** `lpips`, `open_clip_torch`
+
+Install the benchmark dependencies if you plan to use the benchmark node:
+
+```
+pip install lpips open_clip_torch
+```
+
 ## Provided Nodes
 
 ### 1. HSWQ Calibration (Dual Monitor)
@@ -89,6 +101,16 @@ Converts an SDXL UNet model to FP8 using collected calibration statistics.
 5. Optimize `amax` using weighted histogram MSE (HSWQ V1).
 
 The output model remains compatible with standard ComfyUI loaders.
+
+### 3. HSWQ FP8 Converter (Legacy)
+The former `SDXLHSWQQuantizer.py` implementation has been moved to
+`SDXLHSWQQuantizerLegacy.py`, while the latest implementation now lives in
+`SDXLHSWQQuantizer.py`. Use the legacy node for compatibility comparisons with
+the earlier behavior.
+
+### 4. HSWQ Advanced Benchmark
+Provides a benchmark node for comparing output fidelity across FP8/FP16 models.
+This node requires the **`lpips`** and **`open_clip_torch`** packages.
 
 ---
 
