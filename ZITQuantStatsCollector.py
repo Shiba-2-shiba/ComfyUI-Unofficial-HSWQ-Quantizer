@@ -5,6 +5,7 @@ import time
 import threading
 import comfy.model_management
 import folder_paths
+from .hswq_comfy_api import IO
 
 # ----------------------------------------------------------------------------
 # グローバルセッション管理
@@ -165,27 +166,45 @@ class ZITStatsCollectorBackend:
 # ----------------------------------------------------------------------------
 # ComfyUI ノード定義
 # ----------------------------------------------------------------------------
-class ZITHSWQCalibrationNode:
+class ZITHSWQCalibrationNode(IO.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "save_folder_name": ("STRING", {"default": "zit_hswq_stats"}), 
-                "file_prefix": ("STRING", {"default": "zit_calib"}),
-                "session_id": ("STRING", {"default": "session_01"}),
-                "target_layer": (["all_linear_conv", "attention_only", "feed_forward_only", "context_refiner"],),
-                "save_every_steps": ("INT", {"default": 50, "min": 1, "max": 10000}),
-                "reset_session": ("BOOLEAN", {"default": False}),
-            }
-        }
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="ZITHSWQCalibrationNode",
+            display_name="ZIT HSWQ Calibration (DualMonitor V2)",
+            category="ZIT/Quantization",
+            description="Collect HSWQ calibration stats for ZIT/NextDiT models.",
+            inputs=[
+                IO.Model.Input("model"),
+                IO.String.Input("save_folder_name", default="zit_hswq_stats"),
+                IO.String.Input("file_prefix", default="zit_calib"),
+                IO.String.Input("session_id", default="session_01"),
+                IO.Combo.Input(
+                    "target_layer",
+                    options=["all_linear_conv", "attention_only", "feed_forward_only", "context_refiner"],
+                    default="all_linear_conv",
+                ),
+                IO.Int.Input("save_every_steps", default=50, min=1, max=10000),
+                IO.Boolean.Input("reset_session", default=False),
+            ],
+            outputs=[
+                IO.Model.Output("model", display_name="model"),
+            ],
+            search_aliases=["HSWQ", "Calibration", "ZIT", "NextDiT", "Stats", "Collector"],
+            essentials_category="Quantization/ZIT",
+        )
 
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "collect"
-    CATEGORY = "ZIT/Quantization"
-
-    def collect(self, model, save_folder_name, file_prefix, session_id, target_layer, save_every_steps, reset_session):
+    @classmethod
+    def execute(
+        cls,
+        model: IO.Model,
+        save_folder_name: IO.String,
+        file_prefix: IO.String,
+        session_id: IO.String,
+        target_layer: IO.Combo,
+        save_every_steps: IO.Int,
+        reset_session: IO.Boolean,
+    ):
         m = model.clone()
         device = comfy.model_management.get_torch_device()
         
@@ -280,11 +299,3 @@ class ZITHSWQCalibrationNode:
 
         m.set_model_unet_function_wrapper(stats_wrapper)
         return (m, )
-
-NODE_CLASS_MAPPINGS = {
-    "ZITHSWQCalibrationNode": ZITHSWQCalibrationNode
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "ZITHSWQCalibrationNode": "ZIT HSWQ Calibration (DualMonitor V2)"
-}

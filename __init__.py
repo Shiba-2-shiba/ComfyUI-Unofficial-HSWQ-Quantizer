@@ -1,84 +1,51 @@
 import traceback
 
-print("### HSWQ Nodes: Initializing... ###")
+from .hswq_comfy_api import ComfyExtension, _write_import_error
 
-NODE_CLASS_MAPPINGS = {}
-NODE_DISPLAY_NAME_MAPPINGS = {}
+_NODE_IMPORTS = [
+    ("SDXLQuantStatsCollector", "SDXLHSWQCalibrationNode"),
+    ("SDXLHSWQQuantizer", "SDXLHSWQFP8QuantizerNode"),
+    ("SDXLHSWQQuantizerLegacy", "SDXLHSWQFP8QuantizerLegacyNode"),
+    ("ZITQuantStatsCollector", "ZITHSWQCalibrationNode"),
+    ("ZITHSWQQuantizer", "ZITHSWQQuantizerNode"),
+    ("HSWQAdvancedBenchmark", "HSWQAdvancedBenchmark"),
+]
 
-# ============================================================
-# SDXL Series (V1.5 / Legacy)
-# ============================================================
+_NODE_LIST = []
+_IMPORT_ERRORS = []
 
-# 1. SDXL 統計コレクター (Calibration) の読み込み
-try:
-    from .SDXLQuantStatsCollector import NODE_CLASS_MAPPINGS as CalibMappings, NODE_DISPLAY_NAME_MAPPINGS as CalibDisplay
-    NODE_CLASS_MAPPINGS.update(CalibMappings)
-    NODE_DISPLAY_NAME_MAPPINGS.update(CalibDisplay)
-    print("  [OK] SDXLQuantStatsCollector loaded.")
-except Exception as e:
-    print("  [ERROR] Failed to import SDXLQuantStatsCollector")
-    traceback.print_exc()
+for module_name, class_name in _NODE_IMPORTS:
+    try:
+        module = __import__(f"{__name__}.{module_name}", fromlist=[class_name])
+        _NODE_LIST.append(getattr(module, class_name))
+    except Exception:
+        _IMPORT_ERRORS.append((module_name, class_name, traceback.format_exc()))
 
-# 2. SDXL メイン量子化器 (V1.5 / Main) の読み込み
-try:
-    from .SDXLHSWQQuantizer import NODE_CLASS_MAPPINGS as QuantMappings, NODE_DISPLAY_NAME_MAPPINGS as QuantDisplay
-    NODE_CLASS_MAPPINGS.update(QuantMappings)
-    NODE_DISPLAY_NAME_MAPPINGS.update(QuantDisplay)
-    print("  [OK] SDXLHSWQQuantizer (V1.5) loaded.")
-except Exception as e:
-    print("  [ERROR] Failed to import SDXLHSWQQuantizer")
-    traceback.print_exc()
+if _IMPORT_ERRORS:
+    lines = ["[HSWQ] Node import errors:"]
+    for module_name, class_name, err in _IMPORT_ERRORS:
+        lines.append(f"- {module_name}.{class_name} failed:")
+        lines.append(err)
+    _write_import_error("\n".join(lines))
 
-# 3. SDXL レガシー量子化器 (V1.0) の読み込み
-try:
-    from .SDXLHSWQQuantizerLegacy import NODE_CLASS_MAPPINGS as LegacyMappings, NODE_DISPLAY_NAME_MAPPINGS as LegacyDisplay
-    NODE_CLASS_MAPPINGS.update(LegacyMappings)
-    NODE_DISPLAY_NAME_MAPPINGS.update(LegacyDisplay)
-    print("  [OK] SDXLHSWQQuantizerLegacy (V1.0) loaded.")
-except ImportError:
-    pass 
-except Exception as e:
-    print("  [ERROR] Failed to import SDXLHSWQQuantizerLegacy")
-    traceback.print_exc()
 
-# ============================================================
-# ZIT Series (New)
-# ============================================================
+class HSWQExtension(ComfyExtension):
+    async def on_load(self) -> None:
+        print("### HSWQ Nodes: Initializing... ###")
+        if _NODE_LIST:
+            for node in _NODE_LIST:
+                print(f"  [OK] {node.__name__} loaded.")
+        if _IMPORT_ERRORS:
+            print("  [ERROR] Some HSWQ nodes failed to import.")
+            print("  See hswq_import_error.log for details.")
+        print(f"### HSWQ Nodes: Initialization complete. Total nodes: {len(_NODE_LIST)} ###")
 
-# 4. ZIT 統計コレクター (Calibration) の読み込み
-try:
-    from .ZITQuantStatsCollector import NODE_CLASS_MAPPINGS as ZITCalibMappings, NODE_DISPLAY_NAME_MAPPINGS as ZITCalibDisplay
-    NODE_CLASS_MAPPINGS.update(ZITCalibMappings)
-    NODE_DISPLAY_NAME_MAPPINGS.update(ZITCalibDisplay)
-    print("  [OK] ZITQuantStatsCollector loaded.")
-except Exception as e:
-    print("  [ERROR] Failed to import ZITQuantStatsCollector")
-    traceback.print_exc()
+    async def get_node_list(self):
+        return list(_NODE_LIST)
 
-# 5. ZIT 量子化器 (Spec-aligned) の読み込み
-try:
-    from .ZITHSWQQuantizer import NODE_CLASS_MAPPINGS as ZITQuantMappings, NODE_DISPLAY_NAME_MAPPINGS as ZITQuantDisplay
-    NODE_CLASS_MAPPINGS.update(ZITQuantMappings)
-    NODE_DISPLAY_NAME_MAPPINGS.update(ZITQuantDisplay)
-    print("  [OK] ZITHSWQQuantizer loaded.")
-except Exception as e:
-    print("  [ERROR] Failed to import ZITHSWQQuantizer")
-    traceback.print_exc()
 
-# ============================================================
-# Tools / Benchmarks
-# ============================================================
+async def comfy_entrypoint():
+    return HSWQExtension()
 
-# 6. ベンチマークツールの読み込み
-try:
-    from .HSWQAdvancedBenchmark import NODE_CLASS_MAPPINGS as BenchMappings, NODE_DISPLAY_NAME_MAPPINGS as BenchDisplay
-    NODE_CLASS_MAPPINGS.update(BenchMappings)
-    NODE_DISPLAY_NAME_MAPPINGS.update(BenchDisplay)
-    print("  [OK] HSWQAdvancedBenchmark loaded.")
-except Exception as e:
-    print("  [ERROR] Failed to import HSWQAdvancedBenchmark")
-    traceback.print_exc()
 
-print(f"### HSWQ Nodes: Initialization complete. Total nodes: {len(NODE_CLASS_MAPPINGS)} ###")
-
-__all__ = ['NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
+__all__ = ["comfy_entrypoint"]

@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import comfy.model_management
+from .hswq_comfy_api import IO
 
 # --- Dependency Check ---
 try:
@@ -50,44 +51,61 @@ def ssim_tensor(img1, img2, window_size=11, size_average=True):
     else:
         return ssim_map.mean(1).mean(1).mean(1)
 
-class HSWQAdvancedBenchmark:
-    def __init__(self):
-        self.lpips_model = None
-        self.clip_model = None
-        self.device = comfy.model_management.get_torch_device()
+class HSWQAdvancedBenchmark(IO.ComfyNode):
+    _lpips_model = None
+    _clip_model = None
+    _device = None
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "image_ref": ("IMAGE",),
-                "image_target": ("IMAGE",),
-                "compute_lpips": ("BOOLEAN", {"default": True, "label": "Compute LPIPS (Texture)"}),
-                "compute_clip": ("BOOLEAN", {"default": True, "label": "Compute CLIP Score (Semantic)"}),
-                "enable_auto_align": ("BOOLEAN", {"default": True, "label": "Auto-Align Images (Fix Shift)"}),
-                "diff_amplification": ("FLOAT", {"default": 1.0, "min": 1.0, "max": 100.0}),
-            }
-        }
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="HSWQAdvancedBenchmark",
+            display_name="HSWQ Quality Benchmark (Auto-Align)",
+            category="Quantization/Benchmark",
+            description="Benchmark quality between reference and target images with LPIPS/SSIM/CLIP metrics.",
+            inputs=[
+                IO.Image.Input("image_ref"),
+                IO.Image.Input("image_target"),
+                IO.Boolean.Input("compute_lpips", display_name="Compute LPIPS (Texture)", default=True),
+                IO.Boolean.Input("compute_clip", display_name="Compute CLIP Score (Semantic)", default=True),
+                IO.Boolean.Input("enable_auto_align", display_name="Auto-Align Images (Fix Shift)", default=True),
+                IO.Float.Input("diff_amplification", default=1.0, min=1.0, max=100.0),
+            ],
+            outputs=[
+                IO.Image.Output("diff_image", display_name="diff_image"),
+                IO.String.Output("report_text", display_name="report_text"),
+                IO.Float.Output("lpips_dist", display_name="lpips_dist"),
+                IO.Float.Output("ssim_score", display_name="ssim_score"),
+                IO.Float.Output("clip_similarity", display_name="clip_similarity"),
+                IO.Float.Output("mse_error", display_name="mse_error"),
+            ],
+            search_aliases=["HSWQ", "Benchmark", "LPIPS", "SSIM", "CLIP", "Diff"],
+            essentials_category="Quantization/Benchmark",
+        )
 
-    RETURN_TYPES = ("IMAGE", "STRING", "FLOAT", "FLOAT", "FLOAT", "FLOAT")
-    RETURN_NAMES = ("diff_image", "report_text", "lpips_dist", "ssim_score", "clip_similarity", "mse_error")
-    FUNCTION = "evaluate_quality"
-    CATEGORY = "Quantization/Benchmark"
+    @classmethod
+    def _get_device(cls):
+        if cls._device is None:
+            cls._device = comfy.model_management.get_torch_device()
+        return cls._device
 
-    def load_lpips(self):
-        if self.lpips_model is None and LPIPS_AVAILABLE:
+    @classmethod
+    def load_lpips(cls):
+        if cls._lpips_model is None and LPIPS_AVAILABLE:
             print("[HSWQ Bench] Loading LPIPS model (AlexNet)...")
-            self.lpips_model = lpips.LPIPS(net='alex', verbose=False).to(self.device)
-            self.lpips_model.eval()
+            cls._lpips_model = lpips.LPIPS(net='alex', verbose=False).to(cls._get_device())
+            cls._lpips_model.eval()
 
-    def load_clip(self):
-        if self.clip_model is None and CLIP_AVAILABLE:
+    @classmethod
+    def load_clip(cls):
+        if cls._clip_model is None and CLIP_AVAILABLE:
             print("[HSWQ Bench] Loading CLIP model (ViT-B-32)...")
             model, _, _ = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
-            self.clip_model = model.to(self.device)
-            self.clip_model.eval()
+            cls._clip_model = model.to(cls._get_device())
+            cls._clip_model.eval()
 
-    def align_images(self, img_ref, img_target, max_shift=16):
+    @staticmethod
+    def align_images(img_ref, img_target, max_shift=16):
         """
         Brute-force alignment to find best shift (dx, dy) that minimizes MSE.
         img_ref, img_target: (1, H, W, C)
@@ -153,7 +171,17 @@ class HSWQAdvancedBenchmark:
         # Return to BHWC
         return tgt_cropped.permute(0, 2, 3, 1), ref_cropped.permute(0, 2, 3, 1), best_shift
 
-    def evaluate_quality(self, image_ref, image_target, compute_lpips, compute_clip, enable_auto_align, diff_amplification):
+    @classmethod
+    def execute(
+        cls,
+        image_ref: IO.Image,
+        image_target: IO.Image,
+        compute_lpips: IO.Boolean,
+        compute_clip: IO.Boolean,
+        enable_auto_align: IO.Boolean,
+        diff_amplification: IO.Float,
+    ):
+        device = cls._get_device()
         # 1. Validation & Resize
         if image_ref.shape != image_target.shape:
             if image_ref.shape[1:] != image_target.shape[1:]:
@@ -169,17 +197,19 @@ class HSWQAdvancedBenchmark:
         diff_images_batch = []
         shifts_log = []
 
-        if compute_lpips: self.load_lpips()
-        if compute_clip: self.load_clip()
+        if compute_lpips:
+            cls.load_lpips()
+        if compute_clip:
+            cls.load_clip()
 
         for i in range(batch_size):
-            img1 = image_ref[i].unsqueeze(0).to(self.device)   # Ref
-            img2 = image_target[i].unsqueeze(0).to(self.device) # Target
+            img1 = image_ref[i].unsqueeze(0).to(device)   # Ref
+            img2 = image_target[i].unsqueeze(0).to(device) # Target
 
             # --- AUTO ALIGNMENT ---
             shift_info = "0,0"
             if enable_auto_align:
-                img2, img1, shift = self.align_images(img1, img2, max_shift=12)
+                img2, img1, shift = cls.align_images(img1, img2, max_shift=12)
                 shifts_log.append(shift)
                 shift_info = f"{shift[0]},{shift[1]}"
                 if shift != (0, 0):
@@ -207,7 +237,7 @@ class HSWQAdvancedBenchmark:
             ssim_scores.append(ssim_val)
 
             # 3. LPIPS
-            if compute_lpips and LPIPS_AVAILABLE and self.lpips_model:
+            if compute_lpips and LPIPS_AVAILABLE and cls._lpips_model:
                 t1_lpips = img1_nchw * 2.0 - 1.0
                 t2_lpips = img2_nchw * 2.0 - 1.0
                 # LPIPS needs standard size often, but AlexNet handles varying sizes. 
@@ -217,15 +247,15 @@ class HSWQAdvancedBenchmark:
                      lpips_scores.append(0.0)
                 else:
                     with torch.no_grad():
-                        l_dist = self.lpips_model(t1_lpips, t2_lpips).item()
+                        l_dist = cls._lpips_model(t1_lpips, t2_lpips).item()
                     lpips_scores.append(l_dist)
             else:
                 lpips_scores.append(0.0)
 
             # 4. CLIP
-            if compute_clip and CLIP_AVAILABLE and self.clip_model:
-                mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=self.device).view(1, 3, 1, 1)
-                std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=self.device).view(1, 3, 1, 1)
+            if compute_clip and CLIP_AVAILABLE and cls._clip_model:
+                mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device).view(1, 3, 1, 1)
+                std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=device).view(1, 3, 1, 1)
 
                 t1_clip = F.interpolate(img1_nchw, size=(224, 224), mode='bicubic', align_corners=False)
                 t2_clip = F.interpolate(img2_nchw, size=(224, 224), mode='bicubic', align_corners=False)
@@ -234,8 +264,8 @@ class HSWQAdvancedBenchmark:
                 t2_clip = (t2_clip - mean) / std
 
                 with torch.no_grad():
-                    feat1 = self.clip_model.encode_image(t1_clip)
-                    feat2 = self.clip_model.encode_image(t2_clip)
+                    feat1 = cls._clip_model.encode_image(t1_clip)
+                    feat2 = cls._clip_model.encode_image(t2_clip)
                     feat1 /= feat1.norm(dim=-1, keepdim=True)
                     feat2 /= feat2.norm(dim=-1, keepdim=True)
                     similarity = (feat1 @ feat2.T).item()
@@ -295,11 +325,3 @@ class HSWQAdvancedBenchmark:
 
         print(report)
         return (out_diff, report, avg_lpips, avg_ssim, avg_clip, avg_mse)
-
-NODE_CLASS_MAPPINGS = {
-    "HSWQAdvancedBenchmark": HSWQAdvancedBenchmark
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "HSWQAdvancedBenchmark": "HSWQ Quality Benchmark (Auto-Align)"
-}

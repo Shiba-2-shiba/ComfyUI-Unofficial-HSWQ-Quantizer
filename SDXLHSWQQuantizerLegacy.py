@@ -4,6 +4,7 @@ import os
 import sys
 import comfy.model_management
 from comfy.model_patcher import ModelPatcher
+from .hswq_comfy_api import IO
 
 # ------------------------------------------------------------
 # Import HSWQ Optimizer Module
@@ -27,7 +28,7 @@ def _resolve_stats_path(path: str) -> str:
         pass
     return path
 
-class SDXLHSWQFP8QuantizerLegacyNode:
+class SDXLHSWQFP8QuantizerLegacyNode(IO.ComfyNode):
     """
     HSWQ FP8 Converter (Legacy / Compat Mode):
     - Implements HSWQ V1.2 Standalone logic.
@@ -37,22 +38,33 @@ class SDXLHSWQFP8QuantizerLegacyNode:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "hswq_stats_path": ("STRING", {"default": "output/hswq_stats/sdxl_calib_session_01.pt"}),
-                "keep_ratio": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05, "label": "FP16 Keep Ratio"}),
-                "log_level": (["Basic", "Verbose", "Debug"], {"default": "Basic"}),
-            }
-        }
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="HSWQFP8ConverterNodeLegacy",
+            display_name="HSWQ FP8 Converter (Legacy V1.2 Logic)",
+            category="Quantization",
+            description="Legacy FP8 conversion using HSWQ V1.2 behavior.",
+            inputs=[
+                IO.Model.Input("model"),
+                IO.String.Input("hswq_stats_path", default="output/hswq_stats/sdxl_calib_session_01.pt"),
+                IO.Float.Input("keep_ratio", display_name="FP16 Keep Ratio", default=0.25, min=0.0, max=1.0, step=0.05),
+                IO.Combo.Input("log_level", options=["Basic", "Verbose", "Debug"], default="Basic"),
+            ],
+            outputs=[
+                IO.Model.Output("model", display_name="model"),
+            ],
+            search_aliases=["HSWQ", "Legacy", "FP8", "Converter", "SDXL"],
+            essentials_category="Quantization",
+        )
 
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "convert"
-    CATEGORY = "Quantization"
-
-    def convert(self, model, hswq_stats_path, keep_ratio, log_level):
+    @classmethod
+    def execute(
+        cls,
+        model: IO.Model,
+        hswq_stats_path: IO.String,
+        keep_ratio: IO.Float,
+        log_level: IO.Combo,
+    ):
         print(f"### [HSWQ Legacy] Starting FP8 Conversion (Standard/Compat Mode) ###")
         
         # 1. Load Stats
@@ -215,11 +227,3 @@ class SDXLHSWQFP8QuantizerLegacyNode:
             torch.cuda.empty_cache()
 
         return (work_model,)
-
-NODE_CLASS_MAPPINGS = {
-    "HSWQFP8ConverterNodeLegacy": SDXLHSWQFP8QuantizerLegacyNode
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "HSWQFP8ConverterNodeLegacy": "HSWQ FP8 Converter (Legacy V1.2 Logic)"
-}

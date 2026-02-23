@@ -5,6 +5,7 @@ import time
 import threading
 import comfy.model_management
 import folder_paths
+from .hswq_comfy_api import IO
 
 # ----------------------------------------------------------------------------
 # グローバルセッション管理
@@ -178,27 +179,39 @@ class HSWQStatsCollectorBackend:
 # ----------------------------------------------------------------------------
 # ComfyUI ノード定義
 # ----------------------------------------------------------------------------
-class SDXLHSWQCalibrationNode:
+class SDXLHSWQCalibrationNode(IO.ComfyNode):
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "save_folder_name": ("STRING", {"default": "hswq_stats"}), 
-                "file_prefix": ("STRING", {"default": "sdxl_calib"}),
-                "session_id": ("STRING", {"default": "session_01"}),
-                # target_layer 選択肢は廃止 (全対象が安全)
-                "save_every_steps": ("INT", {"default": 50, "min": 1, "max": 10000, "label": "Save Every N Steps"}),
-                "reset_session": ("BOOLEAN", {"default": False}),
-            }
-        }
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="SDXLHSWQCalibrationNode",
+            display_name="SDXL HSWQ Calibration (DualMonitor V2)",
+            category="Quantization",
+            description="Collect HSWQ calibration statistics during SDXL sampling.",
+            inputs=[
+                IO.Model.Input("model"),
+                IO.String.Input("save_folder_name", default="hswq_stats"),
+                IO.String.Input("file_prefix", default="sdxl_calib"),
+                IO.String.Input("session_id", default="session_01"),
+                IO.Int.Input("save_every_steps", display_name="Save Every N Steps", default=50, min=1, max=10000),
+                IO.Boolean.Input("reset_session", default=False),
+            ],
+            outputs=[
+                IO.Model.Output("model", display_name="model"),
+            ],
+            search_aliases=["HSWQ", "Calibration", "SDXL", "Stats", "Collector"],
+            essentials_category="Quantization",
+        )
 
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "collect"
-    CATEGORY = "Quantization"
-
-    def collect(self, model, save_folder_name, file_prefix, session_id, save_every_steps, reset_session):
+    @classmethod
+    def execute(
+        cls,
+        model: IO.Model,
+        save_folder_name: IO.String,
+        file_prefix: IO.String,
+        session_id: IO.String,
+        save_every_steps: IO.Int,
+        reset_session: IO.Boolean,
+    ):
         m = model.clone()
         device = comfy.model_management.get_torch_device()
         
@@ -301,11 +314,3 @@ class SDXLHSWQCalibrationNode:
 
         m.set_model_unet_function_wrapper(stats_wrapper)
         return (m, )
-
-NODE_CLASS_MAPPINGS = {
-    "SDXLHSWQCalibrationNode": SDXLHSWQCalibrationNode
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "SDXLHSWQCalibrationNode": "SDXL HSWQ Calibration (DualMonitor V2)"
-}
