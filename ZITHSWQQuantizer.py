@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import comfy.model_management
 from comfy.model_patcher import ModelPatcher
+from .hswq_comfy_api import IO
 
 # ------------------------------------------------------------
 # Import original HSWQ optimizer (Spec-aligned)
@@ -39,7 +40,7 @@ def _del_buffer(module: nn.Module, name: str):
         del module._buffers[name]
 
 
-class ZITHSWQQuantizerNode:
+class ZITHSWQQuantizerNode(IO.ComfyNode):
     """
     ZIT HSWQ FP8 Quantizer (Spec-aligned):
       - sensitivity: output variance ranking (keep_ratio)
@@ -49,39 +50,42 @@ class ZITHSWQQuantizerNode:
     """
 
     @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "stats_path": ("STRING", {"default": "output/zit_hswq_stats/zit_calib_session_01.pt"}),
-                "keep_ratio": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05}),
-                # HSWQ ZIT V1.5 High Precision Defaults
-                "bins": ("INT", {"default": 8192, "min": 512, "max": 65536, "step": 512}),
-                "num_candidates": ("INT", {"default": 1000, "min": 50, "max": 5000, "step": 50}),
-                "refinement_iterations": ("INT", {"default": 10, "min": 0, "max": 30, "step": 1}),
-                # Modes
-                "scaled": ("BOOLEAN", {"default": False}),  # V1 Compatible (Unscaled)
-                "inject_comfy_metadata": ("BOOLEAN", {"default": True}),
-                "log_level": (["Basic", "Verbose", "Debug"], {"default": "Basic"}),
-            }
-        }
+    def define_schema(cls):
+        return IO.Schema(
+            node_id="ZITHSWQQuantizerNode",
+            display_name="ZIT HSWQ FP8 Quantizer (Spec-aligned)",
+            category="ZIT/Quantization",
+            description="Quantize a ZIT/NextDiT model to FP8 using HSWQ calibration stats.",
+            inputs=[
+                IO.Model.Input("model"),
+                IO.String.Input("stats_path", default="output/zit_hswq_stats/zit_calib_session_01.pt"),
+                IO.Float.Input("keep_ratio", default=0.25, min=0.0, max=1.0, step=0.05),
+                IO.Int.Input("bins", default=8192, min=512, max=65536, step=512),
+                IO.Int.Input("num_candidates", default=1000, min=50, max=5000, step=50),
+                IO.Int.Input("refinement_iterations", default=10, min=0, max=30, step=1),
+                IO.Boolean.Input("scaled", default=False),
+                IO.Boolean.Input("inject_comfy_metadata", default=True),
+                IO.Combo.Input("log_level", options=["Basic", "Verbose", "Debug"], default="Basic"),
+            ],
+            outputs=[
+                IO.Model.Output("model", display_name="model"),
+            ],
+            search_aliases=["HSWQ", "FP8", "Quantizer", "ZIT", "NextDiT", "Calibration"],
+            essentials_category="Quantization/ZIT",
+        )
 
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "convert"
-    CATEGORY = "ZIT/Quantization"
-
-    def convert(
-        self,
-        model,
-        stats_path,
-        keep_ratio,
-        bins,
-        num_candidates,
-        refinement_iterations,
-        scaled,
-        inject_comfy_metadata,
-        log_level,
+    @classmethod
+    def execute(
+        cls,
+        model: IO.Model,
+        stats_path: IO.String,
+        keep_ratio: IO.Float,
+        bins: IO.Int,
+        num_candidates: IO.Int,
+        refinement_iterations: IO.Int,
+        scaled: IO.Boolean,
+        inject_comfy_metadata: IO.Boolean,
+        log_level: IO.Combo,
     ):
         if not hasattr(torch, "float8_e4m3fn"):
             print("[HSWQ] CRITICAL: torch.float8_e4m3fn is not available in this environment.")
@@ -283,11 +287,3 @@ class ZITHSWQQuantizerNode:
             torch.cuda.empty_cache()
 
         return (work_model,)
-
-NODE_CLASS_MAPPINGS = {
-    "ZITHSWQQuantizerNode": ZITHSWQQuantizerNode
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "ZITHSWQQuantizerNode": "ZIT HSWQ FP8 Quantizer (Spec-aligned)"
-}
