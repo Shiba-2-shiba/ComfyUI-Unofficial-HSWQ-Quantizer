@@ -105,6 +105,8 @@ Converts an SDXL UNet model to FP8 using collected calibration statistics.
 * Optional **scaled** mode (default `False`) for spec-aligned V1 behavior.
 * Optional **comfy_quant** and **weight_scale** buffer injection to help
   downstream loaders interpret FP8 weights.
+* Uses the **fast weighted histogram optimizer** path for upstream-aligned
+  amax search behavior.
 * Skips layers without stats or already in FP8, and normalizes BF16 → FP16
   for protected layers.
 * `hswq_stats_path` is resolved relative to ComfyUI output directory when possible.
@@ -120,7 +122,18 @@ Legacy node for compatibility comparisons with earlier behavior.
 * No `comfy_quant` metadata injection.
 * Uses the same output-variance sensitivity ranking and input importance when available.
 
-### 4. HSWQ Advanced Benchmark
+### 4. ZIT HSWQ FP8 Quantizer (Spec-aligned)
+Quantizes a Z Image Turbo / NextDiT model to FP8 using collected calibration
+statistics.
+
+**Notable behavior (current implementation):**
+* Supports the same fast weighted histogram optimizer path used by the SDXL node.
+* Keeps the standard calibration/quantization split used elsewhere in this package.
+* Accepts an optional **profile_path** input for upstream-aligned
+  **profile-aware scoring** and **hard-veto FP16 protection**.
+* Falls back to calibration-stat-driven selection when no profile JSON is supplied.
+
+### 5. HSWQ Advanced Benchmark
 Provides a benchmark node for comparing output fidelity across FP8/FP16 models.
 This node requires the **`lpips`** and **`open_clip_torch`** packages.
 
@@ -183,3 +196,14 @@ or provides explicit attribution where applicable.
   * session restore + atomic save,
   * per-step wrapper-based capture,
   * higher-precision accumulation for output variance and input importance.
+
+### 2026-04-06
+* Refactored **SDXL/ZIT calibration and quantization internals** around shared
+  collector/session and quantizer helpers while preserving separate public node
+  entrypoints.
+* Added a vendored **fast weighted histogram optimizer** path to align SDXL/ZIT
+  custom-node quantization more closely with the upstream repository.
+* Added optional **ZIT profile_path** support for upstream-style profile-aware
+  scoring and hard-veto layer protection.
+* Explicitly kept **Flux/ZIB**, **SageAttention/FlashAttention**, and
+  **entropy-gradient calibration implementation** out of this phase.
